@@ -1,0 +1,59 @@
+############################################
+# ========== STAGE 1: BUILD ==========
+# Esta etapa se encarga de COMPILAR el proyecto
+# Usa JDK porque Maven necesita herramientas de compilación
+############################################
+FROM eclipse-temurin:21-jdk-alpine AS build
+
+# Definimos el directorio de trabajo dentro del contenedor
+# Todas las instrucciones siguientes se ejecutan en /app
+WORKDIR /app
+
+# Copiamos el archivo pom.xml
+# Aquí se definen las dependencias y configuración del proyecto
+COPY pom.xml .
+
+# Copiamos el Maven Wrapper
+# Permite usar Maven sin instalarlo manualmente
+COPY mvnw .
+
+# Copiamos la carpeta .mvn
+# Contiene configuración interna del Maven Wrapper
+COPY .mvn .mvn
+
+# Damos permisos de ejecución al script mvnw
+# En Alpine Linux es necesario hacerlo explícitamente
+RUN chmod +x mvnw
+
+# Descargamos todas las dependencias Maven
+# Este paso se cachea en Docker y acelera builds posteriores
+# Solo se vuelve a ejecutar si cambia el pom.xml
+RUN ./mvnw dependency:go-offline
+
+# Copiamos el código fuente del proyecto
+# Se hace después para no invalidar el cache de dependencias
+COPY src src
+
+# Compilamos el proyecto y generamos el JAR
+# -DskipTests evita ejecutar pruebas y reduce el tiempo de build
+RUN ./mvnw clean package -DskipTests
+
+
+############################################
+# ========== STAGE 2: RUNTIME ==========
+# Esta etapa SOLO ejecuta la aplicación
+# Usa JRE (más ligero) porque ya no necesitamos compilar
+############################################
+FROM eclipse-temurin:21-jre-alpine
+
+# Definimos el directorio de trabajo del contenedor final
+WORKDIR /app
+
+# Copiamos únicamente el JAR generado en la etapa de build
+# --from=build indica que el archivo viene del stage "build"
+# Esto mantiene la imagen final pequeña y limpia
+COPY --from=build /app/target/couponservice-0.0.1-SNAPSHOT.jar app.jar
+
+# Comando que se ejecuta cuando el contenedor inicia
+# Lanza la aplicación Spring Boot
+ENTRYPOINT ["java","-jar","app.jar"]
